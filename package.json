@@ -36,5 +36,10 @@
     "speakeasy": "^2.0.0",
     "twilio": "^5.10.4"
   },
+  "overrides": {
+    "multer-storage-cloudinary": {
+      "cloudinary": "$cloudinary"
+    }
+  },
   "description": ""
 }
