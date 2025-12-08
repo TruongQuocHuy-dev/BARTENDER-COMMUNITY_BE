@@ -49,39 +49,46 @@ export const generateAppSecret = async (req, res) => {
 // --- 2. GỬI MÃ XÁC THỰC QUA SMS ---
 export const sendSmsCode = async (req, res) => {
   try {
-    // Lấy SĐT từ profile của User (như bạn yêu cầu)
+    // 1. Lấy SĐT từ profile của User
     const user = await User.findById(req.user._id).select("phone");
     if (!user || !user.phone) {
       return res
         .status(400)
         .json({ message: "User profile has no phone number" });
-    } // ✅ SỬA LỖI: Tạo mã 6 số ngẫu nhiên đơn giản // Chúng ta không cần dùng speakeasy.totp cho việc này
+    }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString(); // Lưu mã và thời gian hết hạn (5 phút)
+    // 2. Tạo mã 6 số ngẫu nhiên
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // 3. Lưu mã vào Database (BẮT BUỘC ĐỂ BƯỚC VERIFY HOẠT ĐỘNG)
     await SecuritySettings.findOneAndUpdate(
       { user: req.user._id },
       {
         $set: {
           twoFactorTempCode: code,
-          twoFactorTempCodeExpires: new Date(Date.now() + 1000 * 60 * 5),
+          twoFactorTempCodeExpires: new Date(Date.now() + 1000 * 60 * 5), // Hết hạn sau 5 phút
         },
       },
       { upsert: true }
-    ); // Gửi SMS
+    );
 
-    await twilioClient.messages.create({
-      body: `Your ${APP_NAME} verification code is: ${code}`,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: user.phone, // Dùng SĐT của user
-    });
+    // ---------------------------------------------------------------
+    // 🔴 MOCK SMS MODE (THAY VÌ GỬI TWILIO, TA LOG RA MÀN HÌNH)
+    // ---------------------------------------------------------------
+    console.log("\n==================================================");
+    console.log("📱 [MOCK SMS SERVER] Đang gửi tin nhắn...");
+    console.log(`📩 Tới số: ${user.phone}`);
+    console.log(`🔑 MÃ OTP CỦA BẠN LÀ:  👉  ${code}  👈`);
+    console.log("==================================================\n");
 
+    // 4. Giả vờ trả về thành công cho App (App sẽ tưởng là đã gửi thật)
     res.json({
       success: true,
-      message: "Verification code sent to your phone",
+      message: "Verification code sent to your phone (Check Console)",
     });
+
   } catch (err) {
-    console.error("sendSmsCode error:", err); // Lỗi này có thể xảy ra nếu SĐT không hợp lệ hoặc tài khoản Twilio có vấn đề
+    console.error("sendSmsCode error:", err);
     res.status(500).json({ message: "Failed to send SMS" });
   }
 };

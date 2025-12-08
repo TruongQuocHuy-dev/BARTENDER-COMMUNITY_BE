@@ -119,17 +119,15 @@ export const loginWithEmail = async (req, res) => {
           Date.now() + 1000 * 60 * 5
         ); // 5 phút
         await settings.save();
-        try {
-          await twilioClient.messages.create({
-            body: `Your ${APP_NAME} login code is: ${code}`,
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: userWithPhone.phone,
-          });
+       try {
+        console.log("\n========================================");
+          console.log(`📱 [MOCK LOGIN SMS] Gửi tới: ${userWithPhone.phone}`);
+          console.log(`🔑 MÃ ĐĂNG NHẬP 2FA LÀ:  👉  ${code}  👈`);
+          console.log("========================================\n");
+
         } catch (smsError) {
           console.error("Login 2FA SMS error:", smsError);
-          return res
-            .status(500)
-            .json({ message: "Failed to send 2FA SMS code" });
+          return res.status(500).json({ message: "Failed to send 2FA SMS code" });
         }
       } // Trả về lỗi 403 đặc biệt để FE biết cần hỏi 2FA
       return res.status(403).json({
