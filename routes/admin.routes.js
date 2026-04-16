@@ -16,7 +16,8 @@ import {
   approveRecipe,
   rejectRecipe,
   getAllRecipesForAdmin,
-  approveAllPendingRecipes
+  approveAllPendingRecipes,
+  importRecipesBulk
 } from '../controllers/admin.controller.js';
 
 const router = express.Router();
@@ -49,5 +50,6 @@ router.get('/recipes/pending', getPendingRecipes);
 router.put('/recipes/:id/approve', approveRecipe);
 router.put('/recipes/:id/reject', rejectRecipe);
 router.put('/recipes/approve-all', approveAllPendingRecipes);
+router.post('/recipes/import', importRecipesBulk);
 
 export default router;

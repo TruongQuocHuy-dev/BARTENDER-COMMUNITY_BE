@@ -1,10 +1,12 @@
 import User from "../models/User.js";
 import Post from "../models/Post.js";
 import Recipe from "../models/Recipe.js";
+import Category from "../models/Category.js";
 import Banner from "../models/Banner.js";
 import Comment from "../models/Comment.js";
 import Payment from "../models/Payment.js";
 import Report from "../models/Report.js";
+import SubscriptionPlan from "../models/SubscriptionPlan.js";
 
 import Notifications from "../models/Notifications.js";
 import Subscription from "../models/Subscription.js";
@@ -13,8 +15,31 @@ import { sendNotificationToExternalIds } from "../services/notification.service.
 
 export const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select("-password");
-    res.json(users);
+    const users = await User.find().select("-password").lean();
+    const userIds = users.map((u) => u._id);
+
+    const subscriptions = await Subscription.find({
+      user: { $in: userIds },
+    })
+      .select("user tier planId endDate")
+      .lean();
+
+    const subscriptionMap = new Map(
+      subscriptions.map((sub) => [String(sub.user), sub]),
+    );
+
+    const usersWithSubscription = users.map((user) => ({
+      ...user,
+      isActive: user.isActive ?? true,
+      isBanned: user.isBanned ?? false,
+      subscription: subscriptionMap.get(String(user._id)) || {
+        tier: "free",
+        planId: "free",
+        endDate: null,
+      },
+    }));
+
+    res.json(usersWithSubscription);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch users" });
   }
@@ -23,7 +48,7 @@ export const getAllUsers = async (req, res) => {
 export const deleteUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
-    if (!user || user.isAdmin) {
+    if (!user || user.role === "admin") {
       return res
         .status(400)
         .json({ message: "Cannot delete admin or user not found" });
@@ -38,19 +63,85 @@ export const deleteUser = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     const userId = req.params.id;
-    const updateData = req.body;
+    const { role, isBanned, isVerified, subscriptionPlanId } = req.body;
+
+    let resolvedPlan = null;
+    if (typeof subscriptionPlanId === "string" && subscriptionPlanId.trim()) {
+      const planId = subscriptionPlanId.trim();
+      if (planId !== "free") {
+        resolvedPlan = await SubscriptionPlan.findOne({ planId });
+        if (!resolvedPlan) {
+          return res.status(400).json({ message: "Invalid subscription plan" });
+        }
+      }
+    }
+
+    const updateData = {
+      ...(["user", "admin"].includes(role) ? { role } : {}),
+      ...(typeof isBanned === "boolean" ? { isBanned } : {}),
+      ...(typeof isVerified === "boolean" ? { isVerified } : {}),
+    };
 
     // Prevent changing password via this endpoint
     delete updateData.password;
 
+    const hasSubscriptionChange = typeof subscriptionPlanId === "string" && subscriptionPlanId.trim().length > 0;
+
+    if (Object.keys(updateData).length === 0 && !hasSubscriptionChange) {
+      return res.status(400).json({ message: "No valid fields to update" });
+    }
+
     const user = await User.findByIdAndUpdate(userId, updateData, {
       new: true,
+      runValidators: true,
     }).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (hasSubscriptionChange) {
+      const planId = subscriptionPlanId.trim();
+      if (planId === "free") {
+        await Subscription.findOneAndUpdate(
+          { user: userId },
+          {
+            $set: {
+              user: userId,
+              planId: "free",
+              tier: "free",
+              price: 0,
+              currency: "USD",
+              endDate: null,
+              autoRenew: false,
+            },
+          },
+          { upsert: true, new: true, runValidators: true },
+        );
+      } else if (resolvedPlan) {
+        const currentSubscription = await Subscription.findOne({ user: userId });
+        await Subscription.findOneAndUpdate(
+          { user: userId },
+          {
+            $set: {
+              user: userId,
+              planId: resolvedPlan.planId,
+              tier: resolvedPlan.tier,
+              price: resolvedPlan.price,
+              currency: resolvedPlan.currency,
+              ...(currentSubscription?.startDate ? {} : { startDate: new Date() }),
+              autoRenew: currentSubscription?.autoRenew ?? true,
+              endDate: currentSubscription?.endDate ?? null,
+            },
+          },
+          { upsert: true, new: true, runValidators: true },
+        );
+      }
+    }
 
     res.json(user);
   } catch (err) {
     console.error("updateUser error:", err);
+    if (err.code === 11000 && err.keyPattern?.email) {
+      return res.status(400).json({ message: "Email already in use" });
+    }
     res.status(500).json({ message: "Failed to update user" });
   }
 };
@@ -388,6 +479,223 @@ export const approveAllPendingRecipes = async (req, res) => {
     // Log lỗi nếu có
     console.error("approveAllPendingRecipes error:", err);
     res.status(500).json({ message: "Lỗi khi duyệt hàng loạt" });
+  }
+};
+
+const DIFFICULTY_VALUES = new Set(["easy", "medium", "hard"]);
+const ALCOHOL_VALUES = new Set(["none", "low", "medium", "high"]);
+
+const normalizeImportKey = (key) =>
+  String(key || "")
+    .replace(/^\uFEFF/, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+const getValueByAliases = (row, aliases = []) => {
+  if (!row || typeof row !== "object") return "";
+
+  const normalizedRow = {};
+  Object.entries(row).forEach(([k, v]) => {
+    normalizedRow[normalizeImportKey(k)] = v;
+  });
+
+  for (const alias of aliases) {
+    const value = normalizedRow[normalizeImportKey(alias)];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return value;
+    }
+  }
+
+  return "";
+};
+
+const toBool = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value !== "string") return false;
+  const v = value.trim().toLowerCase();
+  return v === "true" || v === "1" || v === "yes" || v === "y";
+};
+
+const parseSteps = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((step) => String(step || "").trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const input = value.trim();
+    if (!input) return [];
+
+    if (input.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(input);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((step) => String(step || "").trim())
+            .filter(Boolean);
+        }
+      } catch {
+        // fallthrough to delimiter parsing
+      }
+    }
+
+    return input
+      .split(";")
+      .map((step) => step.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const parseIngredients = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((ing) => ({
+        name: String(ing?.name || "").trim(),
+        amount: String(ing?.amount || "").trim(),
+        unit: String(ing?.unit || "").trim(),
+      }))
+      .filter((ing) => ing.name);
+  }
+
+  if (typeof value === "string") {
+    const input = value.trim();
+    if (!input) return [];
+
+    if (input.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(input);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((ing) => ({
+              name: String(ing?.name || "").trim(),
+              amount: String(ing?.amount || "").trim(),
+              unit: String(ing?.unit || "").trim(),
+            }))
+            .filter((ing) => ing.name);
+        }
+      } catch {
+        // fallthrough to delimiter parsing
+      }
+    }
+
+    return input
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const [name = "", amount = "", unit = ""] = part.split("|");
+        return {
+          name: name.trim(),
+          amount: amount.trim(),
+          unit: unit.trim(),
+        };
+      })
+      .filter((ing) => ing.name);
+  }
+
+  return [];
+};
+
+/**
+ * [ADMIN] Import công thức hàng loạt
+ * POST /api/admin/recipes/import
+ * body: { recipes: RecipeLike[] }
+ */
+export const importRecipesBulk = async (req, res) => {
+  try {
+    const inputRecipes = Array.isArray(req.body?.recipes) ? req.body.recipes : [];
+
+    if (!inputRecipes.length) {
+      return res.status(400).json({ message: "recipes must be a non-empty array" });
+    }
+
+    if (inputRecipes.length > 300) {
+      return res.status(400).json({ message: "Maximum 300 recipes per import" });
+    }
+
+    const errors = [];
+    const normalized = [];
+
+    inputRecipes.forEach((row, index) => {
+      const name = String(getValueByAliases(row, ["name", "ten_cong_thuc", "ten", "recipe_name"]) || "").trim();
+      const category = String(getValueByAliases(row, ["category", "danh_muc", "loai"]) || "").trim();
+      const description = String(getValueByAliases(row, ["description", "mo_ta", "mo_ta_ngan", "desc"]) || "").trim();
+      const difficultyRaw = String(getValueByAliases(row, ["difficulty", "do_kho", "level"]) || "medium").trim().toLowerCase();
+      const alcoholRaw = String(getValueByAliases(row, ["alcoholLevel", "alcohol_level", "nong_do", "nong_do_con"]) || "medium").trim().toLowerCase();
+      const ingredients = parseIngredients(getValueByAliases(row, ["ingredients", "nguyen_lieu", "nguyen_lie", "ingredient"]));
+      const steps = parseSteps(getValueByAliases(row, ["steps", "cac_buoc", "buoc_lam", "huong_dan"]));
+      const author = getValueByAliases(row, ["author", "authorId", "tac_gia", "nguoi_tao"]) || req.user?._id;
+
+      if (!name) errors.push({ row: index + 1, message: "name is required" });
+      if (!category) errors.push({ row: index + 1, message: "category is required" });
+      if (!ingredients.length) errors.push({ row: index + 1, message: "at least one ingredient is required" });
+      if (!steps.length) errors.push({ row: index + 1, message: "at least one step is required" });
+
+      if (!name || !category || !ingredients.length || !steps.length) return;
+
+      normalized.push({
+        name,
+        category,
+        description,
+        difficulty: DIFFICULTY_VALUES.has(difficultyRaw) ? difficultyRaw : "medium",
+        alcoholLevel: ALCOHOL_VALUES.has(alcoholRaw) ? alcoholRaw : "medium",
+        ingredients,
+        steps,
+        imageUrl: String(getValueByAliases(row, ["imageUrl", "image_url", "hinh_anh", "anh"]) || "").trim(),
+        videoUrl: String(getValueByAliases(row, ["videoUrl", "video_url", "video"]) || "").trim(),
+        isPremium: toBool(getValueByAliases(row, ["isPremium", "premium", "cao_cap"])),
+        author,
+        status: "approved",
+      });
+    });
+
+    if (!normalized.length) {
+      return res.status(400).json({
+        message: "No valid recipes to import",
+        failedCount: errors.length,
+        errors: errors.slice(0, 50),
+      });
+    }
+
+    const inserted = await Recipe.insertMany(normalized, { ordered: false });
+
+    if (inserted.length) {
+      const categoryCounts = inserted.reduce((acc, recipe) => {
+        const key = String(recipe.category || "").trim();
+        if (!key) return acc;
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+
+      const categoryOps = Object.entries(categoryCounts).map(([name, count]) => ({
+        updateOne: {
+          filter: { name },
+          update: { $inc: { count } },
+          upsert: true,
+        },
+      }));
+
+      if (categoryOps.length) {
+        await Category.bulkWrite(categoryOps);
+      }
+    }
+
+    return res.status(201).json({
+      message: `Imported ${inserted.length} recipes successfully`,
+      insertedCount: inserted.length,
+      failedCount: errors.length,
+      errors: errors.slice(0, 50),
+    });
+  } catch (err) {
+    console.error("importRecipesBulk error:", err);
+    return res.status(500).json({ message: "Failed to import recipes" });
   }
 };
 

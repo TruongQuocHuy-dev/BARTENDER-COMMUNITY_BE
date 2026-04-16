@@ -14,6 +14,8 @@ const userSchema = new mongoose.Schema(
     website: { type: String },
     avatarUrl: { type: String, default: "" },
     role: { type: String, enum: ["user", "admin"], default: "user" },
+    isActive: { type: Boolean, default: true },
+    isBanned: { type: Boolean, default: false },
     googleId: { type: String },
     facebookId: { type: String },
     isVerified: { type: Boolean, default: false }, // email verified
