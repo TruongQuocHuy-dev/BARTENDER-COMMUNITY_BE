@@ -8,7 +8,7 @@ const planSchema = new mongoose.Schema({
   name: { type: String, required: true },
   price: { type: Number, required: true },
   currency: { type: String, required: true, default: "USD" },
-  billingCycle: { type: String, enum: ["monthly", "yearly"], required: true },
+  billingCycle: { type: String, enum: ["free", "monthly", "yearly"], required: true },
   features: [{ type: String }],
   popularPlan: { type: Boolean, default: false },
 });

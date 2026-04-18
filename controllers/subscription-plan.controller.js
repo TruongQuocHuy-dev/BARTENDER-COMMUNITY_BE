@@ -1,6 +1,58 @@
 // controllers/subscriptionPlanController.js
 import SubscriptionPlan from "../models/SubscriptionPlan.js";
 
+const normalizePlanIdBase = (value = "") => {
+  return String(value)
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+};
+
+const parseFeatures = (features) => {
+  if (Array.isArray(features)) {
+    return features.map((feature) => String(feature).trim()).filter(Boolean);
+  }
+
+  if (typeof features === "string") {
+    return features
+      .split(/[\n,]/)
+      .map((feature) => String(feature).trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const toPlanPayload = (input, existingPlanIds, usedPlanIds) => {
+  const source = input && typeof input === "object" ? input : {};
+  const name = String(source.name || "").trim();
+  const providedPlanId = String(source.planId || "").trim();
+  const basePlanId = normalizePlanIdBase(providedPlanId || name) || "plan";
+  let planId = `${basePlanId}-1`;
+  let suffix = 2;
+
+  while (existingPlanIds.has(planId) || usedPlanIds.has(planId)) {
+    planId = `${basePlanId}-${suffix}`;
+    suffix += 1;
+  }
+
+  usedPlanIds.add(planId);
+
+  return {
+    planId,
+    tier: source.tier,
+    name,
+    price: source.price,
+    currency: source.currency || "USD",
+    billingCycle: source.billingCycle,
+    features: parseFeatures(source.features),
+    popularPlan: Boolean(source.popularPlan),
+  };
+};
+
 /**
  * @desc    Lấy tất cả các gói đăng ký
  * @route   GET /api/v1/subscription-plans
@@ -34,16 +86,51 @@ export const getPlanById = async (req, res) => {
 
 export const createPlan = async (req, res) => {
   try {
-    const { planId, tier, name, price, currency = 'USD', billingCycle, features = [], popularPlan = false } = req.body;
-    if (!planId || !tier || !name || price === undefined || !billingCycle) {
-      return res.status(400).json({ message: 'Thiếu trường bắt buộc' });
+    const incomingPlans = Array.isArray(req.body)
+      ? req.body
+      : Array.isArray(req.body?.plans)
+        ? req.body.plans
+        : [req.body];
+
+    const existingPlanIds = new Set(
+      (await SubscriptionPlan.find({}, { planId: 1, _id: 0 })).map((plan) => plan.planId),
+    );
+    const usedPlanIds = new Set();
+
+    const normalizedPlans = incomingPlans.map((plan, index) => {
+      const payload = toPlanPayload(plan, existingPlanIds, usedPlanIds);
+
+      if (!payload.tier || !payload.name || payload.price === undefined || !payload.billingCycle) {
+        const validationError = new Error(`Thiếu trường bắt buộc ở gói thứ ${index + 1}`);
+        validationError.statusCode = 400;
+        throw validationError;
+      }
+
+      return payload;
+    });
+
+    if (normalizedPlans.length === 0) {
+      return res.status(400).json({ message: 'Thiếu dữ liệu gói thanh toán' });
     }
-    const exists = await SubscriptionPlan.findOne({ planId });
-    if (exists) return res.status(409).json({ message: 'planId đã tồn tại' });
-    const doc = await SubscriptionPlan.create({ planId, tier, name, price, currency, billingCycle, features, popularPlan });
-    res.status(201).json(doc);
+
+    const docs = await SubscriptionPlan.insertMany(normalizedPlans, { ordered: true });
+
+    if (docs.length === 1) {
+      return res.status(201).json(docs[0]);
+    }
+
+    res.status(201).json({
+      message: `Đã tạo ${docs.length} gói thanh toán`,
+      created: docs,
+    });
   } catch (err) {
     console.error('createPlan error:', err);
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    if (err?.code === 11000) {
+      return res.status(409).json({ message: 'planId đã tồn tại' });
+    }
     res.status(500).json({ message: 'Không thể tạo gói' });
   }
 };

@@ -269,7 +269,11 @@ const processSuccessfulPayment = async (orderId) => {
     if (!plan) throw new Error(`Không tìm thấy planId ${payment.planId}`);
 
     // 3. Tính ngày hết hạn
-    const billingDays = plan.billingCycle === "hàng năm" ? 365 : 30;
+    const billingDays = plan.billingCycle === "yearly"
+      ? 365
+      : plan.billingCycle === "monthly"
+        ? 30
+        : 0;
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + billingDays);
 
