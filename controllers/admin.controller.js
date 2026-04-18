@@ -512,6 +512,19 @@ const getValueByAliases = (row, aliases = []) => {
   return "";
 };
 
+const getArrayByAliases = (obj, aliases = []) => {
+  if (!obj || typeof obj !== "object") return [];
+
+  const entries = Object.entries(obj);
+  for (const alias of aliases) {
+    const target = normalizeImportKey(alias);
+    const matched = entries.find(([k]) => normalizeImportKey(k) === target);
+    if (matched && Array.isArray(matched[1])) return matched[1];
+  }
+
+  return [];
+};
+
 const toBool = (value) => {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
@@ -585,22 +598,155 @@ const parseIngredients = (value) => {
       }
     }
 
+    const parseIngredientPart = (part) => {
+      const chunk = String(part || "").trim();
+      if (!chunk) return { name: "", amount: "", unit: "" };
+
+      const pickDelimiter = () => {
+        if ((chunk.match(/\|/g) || []).length >= 2) return "|";
+        if ((chunk.match(/:/g) || []).length >= 2) return ":";
+        if ((chunk.match(/-/g) || []).length >= 2) return "-";
+        return "|";
+      };
+
+      const delimiter = pickDelimiter();
+      const [name = "", amount = "", unit = ""] = chunk.split(delimiter);
+
+      const normalize = (input) => String(input || "").trim();
+      const amountOnlyMatch = chunk.match(/^((?:\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?|\d+\/\d+|few|a few|some|ít|vài|nhiều|đủ(?: đầy)?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười))\s+(.+)$/iu);
+      const amountUnitMatch = chunk.match(/^((?:\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?|\d+\/\d+|few|a few|some|ít|vài|nhiều|đủ(?: đầy)?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười))\s*(ml|l|cl|oz|gr|g|kg|mg|mcg|giọt|dash(?:es)?|muỗng nhỏ|muỗng canh|thìa cà phê|thìa canh|cốc|ly|chai|trái|quả|lá|miếng|lát|nhánh|củ|viên|phần|túi|piece|pieces|drop|drops|pinch)\.?\s+(.+)$/iu);
+
+      if (amountUnitMatch) {
+        return {
+          name: normalize(amountUnitMatch[3]),
+          amount: normalize(amountUnitMatch[1]),
+          unit: normalize(amountUnitMatch[2]),
+        };
+      }
+
+      if (amountOnlyMatch) {
+        return {
+          name: normalize(amountOnlyMatch[2]),
+          amount: normalize(amountOnlyMatch[1]),
+          unit: "",
+        };
+      }
+
+      return {
+        name: normalize(name),
+        amount: normalize(amount),
+        unit: normalize(unit),
+      };
+    };
+
     return input
       .split(";")
       .map((part) => part.trim())
       .filter(Boolean)
-      .map((part) => {
-        const [name = "", amount = "", unit = ""] = part.split("|");
-        return {
-          name: name.trim(),
-          amount: amount.trim(),
-          unit: unit.trim(),
-        };
-      })
+      .map(parseIngredientPart)
       .filter((ing) => ing.name);
   }
 
   return [];
+};
+
+const buildRecipesFromSplitSheets = (payload) => {
+  const recipeRows = getArrayByAliases(payload, [
+    "recipes",
+    "recipe_sheet",
+    "sheet_recipes",
+    "cong_thuc",
+    "recipes_data",
+  ]);
+
+  if (!recipeRows.length) return [];
+
+  const ingredientRows = getArrayByAliases(payload, [
+    "ingredients",
+    "ingredient_sheet",
+    "sheet_ingredients",
+    "nguyen_lieu",
+  ]);
+
+  const stepRows = getArrayByAliases(payload, [
+    "steps",
+    "step_sheet",
+    "sheet_steps",
+    "cac_buoc",
+  ]);
+
+  const recipeMap = new Map();
+
+  const resolveRecipeKey = (row = {}) => {
+    const keyValue = getValueByAliases(row, [
+      "recipe_key",
+      "recipeKey",
+      "recipe_id",
+      "ma_cong_thuc",
+      "recipe_name",
+      "ten_cong_thuc",
+      "name",
+      "ten",
+    ]);
+
+    return String(keyValue || "").trim().toLowerCase();
+  };
+
+  recipeRows.forEach((row, idx) => {
+    const name = String(getValueByAliases(row, ["name", "ten_cong_thuc", "ten", "recipe_name"]) || "").trim();
+    const key = resolveRecipeKey(row) || name.toLowerCase() || `row_${idx}`;
+
+    recipeMap.set(key, {
+      ...row,
+      name,
+      ingredients: parseIngredients(getValueByAliases(row, ["ingredients", "nguyen_lieu", "ingredient"])),
+      steps: parseSteps(getValueByAliases(row, ["steps", "cac_buoc", "huong_dan"])),
+    });
+  });
+
+  ingredientRows.forEach((row) => {
+    const key = resolveRecipeKey(row);
+    if (!key || !recipeMap.has(key)) return;
+
+    const name = String(getValueByAliases(row, ["ingredient", "name", "ingredient_name", "ten_nguyen_lieu", "nguyen_lieu"]) || "").trim();
+    const amount = String(getValueByAliases(row, ["quantity", "amount", "so_luong", "soluong", "s_l", "sl", "dinh_luong"]) || "").trim();
+    const unit = String(getValueByAliases(row, ["unit", "don_vi", "donvi", "dvt"]) || "").trim();
+    const direction = String(getValueByAliases(row, ["ingredient_direction", "ingredientDirection", "huong_dan_nguyen_lieu"]) || "").trim();
+    const combined = getValueByAliases(row, ["ingredients", "ingredient", "nguyen_lieu"]) || direction;
+
+    if (name || amount || unit) {
+      const fallback = parseIngredients(combined)[0] || {};
+      recipeMap.get(key).ingredients.push({
+        name: name || fallback.name || "",
+        amount: amount || fallback.amount || "",
+        unit: unit || fallback.unit || "",
+      });
+      return;
+    }
+
+    const parsedCombined = parseIngredients(combined);
+    if (parsedCombined.length) {
+      recipeMap.get(key).ingredients.push(...parsedCombined);
+    }
+  });
+
+  stepRows.forEach((row) => {
+    const key = resolveRecipeKey(row);
+    if (!key || !recipeMap.has(key)) return;
+
+    const combined = getValueByAliases(row, ["steps", "step", "content", "mo_ta_buoc", "buoc", "cac_buoc"]);
+    const parsedSteps = parseSteps(combined);
+
+    if (parsedSteps.length) {
+      recipeMap.get(key).steps.push(...parsedSteps);
+      return;
+    }
+
+    const single = String(combined || "").trim();
+    if (single) recipeMap.get(key).steps.push(single);
+  });
+
+  return Array.from(recipeMap.values());
 };
 
 /**
@@ -610,10 +756,15 @@ const parseIngredients = (value) => {
  */
 export const importRecipesBulk = async (req, res) => {
   try {
-    const inputRecipes = Array.isArray(req.body?.recipes) ? req.body.recipes : [];
+    let inputRecipes = Array.isArray(req.body?.recipes) ? req.body.recipes : [];
+    if (!inputRecipes.length && req.body && typeof req.body === "object") {
+      inputRecipes = buildRecipesFromSplitSheets(req.body);
+    }
 
     if (!inputRecipes.length) {
-      return res.status(400).json({ message: "recipes must be a non-empty array" });
+      return res.status(400).json({
+        message: "recipes must be a non-empty array (or provide split sheets: recipes + ingredients + steps)",
+      });
     }
 
     if (inputRecipes.length > 300) {
@@ -629,7 +780,7 @@ export const importRecipesBulk = async (req, res) => {
       const description = String(getValueByAliases(row, ["description", "mo_ta", "mo_ta_ngan", "desc"]) || "").trim();
       const difficultyRaw = String(getValueByAliases(row, ["difficulty", "do_kho", "level"]) || "medium").trim().toLowerCase();
       const alcoholRaw = String(getValueByAliases(row, ["alcoholLevel", "alcohol_level", "nong_do", "nong_do_con"]) || "medium").trim().toLowerCase();
-      const ingredients = parseIngredients(getValueByAliases(row, ["ingredients", "nguyen_lieu", "nguyen_lie", "ingredient"]));
+        const ingredients = parseIngredients(getValueByAliases(row, ["ingredients", "nguyen_lieu", "nguyen_lie", "ingredient", "ingredient_direction"]));
       const steps = parseSteps(getValueByAliases(row, ["steps", "cac_buoc", "buoc_lam", "huong_dan"]));
       const author = getValueByAliases(row, ["author", "authorId", "tac_gia", "nguoi_tao"]) || req.user?._id;
 
