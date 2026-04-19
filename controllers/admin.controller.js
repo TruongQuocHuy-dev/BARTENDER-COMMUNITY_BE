@@ -264,8 +264,19 @@ export const getRevenueStats = async (req, res) => {
  */
 export const getAllReports = async (req, res) => {
   try {
+    const { type, status } = req.query;
+    const filter = {};
+
+    if (type && ["support", "violation"].includes(type)) {
+      filter.type = type;
+    }
+
+    if (status && ["pending", "reviewed", "resolved"].includes(status)) {
+      filter.status = status;
+    }
+
     // Lấy và sắp xếp pending lên đầu
-    const reports = await Report.find()
+    const reports = await Report.find(filter)
       .populate("reporter", "fullName email")
       .populate("reportedPost", "caption likes comments") // <-- Thêm 'likes' và 'comments'
       .populate("reportedComment")
@@ -274,6 +285,139 @@ export const getAllReports = async (req, res) => {
   } catch (err) {
     console.error("getAllReports error:", err);
     res.status(500).json({ message: "Failed to fetch reports" });
+  }
+};
+
+/**
+ * [ADMIN] Tổng quan báo cáo và hỗ trợ cho trang quản trị
+ */
+export const getReportOverview = async (req, res) => {
+  try {
+    const [statusAgg, typeAgg, recentAgg, totalRevenueAgg] = await Promise.all([
+      Report.aggregate([
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      Report.aggregate([
+        {
+          $group: {
+            _id: "$type",
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      Report.aggregate([
+        {
+          $facet: {
+            byDay: [
+              {
+                $match: {
+                  createdAt: {
+                    $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+                  },
+                },
+              },
+              {
+                $group: {
+                  _id: {
+                    y: { $year: "$createdAt" },
+                    m: { $month: "$createdAt" },
+                    d: { $dayOfMonth: "$createdAt" },
+                  },
+                  count: { $sum: 1 },
+                },
+              },
+              { $sort: { "_id.y": 1, "_id.m": 1, "_id.d": 1 } },
+            ],
+            topReasons: [
+              { $match: { type: "violation" } },
+              {
+                $project: {
+                  reason: {
+                    $trim: {
+                      input: {
+                        $substrCP: [
+                          { $ifNull: ["$reason", "Khong ro ly do"] },
+                          0,
+                          70,
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                $group: {
+                  _id: "$reason",
+                  count: { $sum: 1 },
+                },
+              },
+              { $sort: { count: -1 } },
+              { $limit: 5 },
+            ],
+          },
+        },
+      ]),
+      Payment.aggregate([
+        { $match: { status: "completed" } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
+    ]);
+
+    const statusMap = statusAgg.reduce((acc, item) => {
+      acc[item._id || "unknown"] = item.count;
+      return acc;
+    }, {});
+
+    const typeMap = typeAgg.reduce((acc, item) => {
+      acc[item._id || "unknown"] = item.count;
+      return acc;
+    }, {});
+
+    const recentData = recentAgg[0] || { byDay: [], topReasons: [] };
+
+    const pendingCount = statusMap.pending || 0;
+    const reviewedCount = statusMap.reviewed || 0;
+    const resolvedCount = statusMap.resolved || 0;
+    const supportCount = typeMap.support || 0;
+    const violationCount = typeMap.violation || 0;
+
+    const totalCount = pendingCount + reviewedCount + resolvedCount;
+
+    res.json({
+      counts: {
+        total: totalCount,
+        pending: pendingCount,
+        reviewed: reviewedCount,
+        resolved: resolvedCount,
+        support: supportCount,
+        violation: violationCount,
+      },
+      queueHealth: {
+        pendingRatio: totalCount ? Number(((pendingCount / totalCount) * 100).toFixed(1)) : 0,
+        resolvedRatio: totalCount ? Number(((resolvedCount / totalCount) * 100).toFixed(1)) : 0,
+      },
+      recent7Days: recentData.byDay.map((item) => ({
+        year: item._id.y,
+        month: item._id.m,
+        day: item._id.d,
+        count: item.count,
+      })),
+      topReasons: recentData.topReasons.map((item) => ({
+        reason: item._id,
+        count: item.count,
+      })),
+      revenue: {
+        totalRevenue: totalRevenueAgg[0]?.total || 0,
+      },
+    });
+  } catch (err) {
+    console.error("getReportOverview error:", err);
+    res.status(500).json({ message: "Failed to fetch report overview" });
   }
 };
 

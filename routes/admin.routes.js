@@ -10,6 +10,7 @@ import {
   getAdminStats,
   getRevenueStats,
   getAllReports,
+  getReportOverview,
   updateReportStatus,
   deleteReport,
   getPendingRecipes,
@@ -42,6 +43,7 @@ router.delete('/posts/:id', deletePost);
 router.delete('/comments/:id', deleteComment);
 
 router.get('/reports', getAllReports);
+router.get('/reports/overview', getReportOverview);
 router.put('/reports/:id', updateReportStatus);
 router.delete('/reports/:id', deleteReport);
 
