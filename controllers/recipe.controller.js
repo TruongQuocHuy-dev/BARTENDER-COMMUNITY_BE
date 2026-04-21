@@ -16,6 +16,26 @@ import { Pinecone } from "@pinecone-database/pinecone";
 import { pipeline } from "@xenova/transformers";
 import fs from "fs";
 
+const normalizeRecipeName = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+const findRecipeByName = async (name) => {
+  const normalized = normalizeRecipeName(name);
+  if (!normalized) return null;
+
+  return Recipe.findOne(
+    {
+      $expr: {
+        $eq: [{ $toLower: { $trim: { input: "$name" } } }, normalized],
+      },
+    },
+    "_id name"
+  ).lean();
+};
+
 const extractorPromise = pipeline(
   "image-feature-extraction",
   "Xenova/clip-vit-base-patch32"
@@ -258,8 +278,16 @@ const createRecipe = async (req, res, next) => {
     }
 
     // 3. Tạo đối tượng data công thức
+    const recipeName = String(req.body.name || "").trim();
+    const duplicatedRecipe = await findRecipeByName(recipeName);
+    if (duplicatedRecipe) {
+      return res.status(409).json({
+        message: `Tên công thức đã tồn tại: ${duplicatedRecipe.name}`,
+      });
+    }
+
     const recipeData = {
-      name: req.body.name,
+      name: recipeName,
       description: req.body.description || "",
       category: req.body.category,
       difficulty: req.body.difficulty || "medium",

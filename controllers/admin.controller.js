@@ -628,6 +628,11 @@ export const approveAllPendingRecipes = async (req, res) => {
 
 const DIFFICULTY_VALUES = new Set(["easy", "medium", "hard"]);
 const ALCOHOL_VALUES = new Set(["none", "low", "medium", "high"]);
+const normalizeRecipeName = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 
 const normalizeImportKey = (key) =>
   String(key || "")
@@ -917,6 +922,7 @@ export const importRecipesBulk = async (req, res) => {
 
     const errors = [];
     const normalized = [];
+    const importedNameMap = new Map();
 
     inputRecipes.forEach((row, index) => {
       const name = String(getValueByAliases(row, ["name", "ten_cong_thuc", "ten", "recipe_name"]) || "").trim();
@@ -935,7 +941,19 @@ export const importRecipesBulk = async (req, res) => {
 
       if (!name || !category || !ingredients.length || !steps.length) return;
 
+      const normalizedName = normalizeRecipeName(name);
+      if (importedNameMap.has(normalizedName)) {
+        errors.push({
+          row: index + 1,
+          message: `duplicate name in file: ${name}`,
+        });
+        return;
+      }
+
+      importedNameMap.set(normalizedName, true);
+
       normalized.push({
+        _importRow: index + 1,
         name,
         category,
         description,
@@ -959,7 +977,42 @@ export const importRecipesBulk = async (req, res) => {
       });
     }
 
-    const inserted = await Recipe.insertMany(normalized, { ordered: false });
+    const importedNames = normalized.map((recipe) => recipe.name);
+    const existingRecipes = await Recipe.find(
+      { name: { $in: importedNames } },
+      "name"
+    )
+      .collation({ locale: "en", strength: 2 })
+      .lean();
+
+    const existingNameSet = new Set(
+      existingRecipes.map((recipe) => normalizeRecipeName(recipe.name))
+    );
+
+    const validToInsert = [];
+    normalized.forEach((recipe) => {
+      const normalizedName = normalizeRecipeName(recipe.name);
+      if (existingNameSet.has(normalizedName)) {
+        errors.push({
+          row: recipe._importRow,
+          message: `name already exists: ${recipe.name}`,
+        });
+        return;
+      }
+      const { _importRow, ...recipeData } = recipe;
+      validToInsert.push(recipeData);
+    });
+
+    if (!validToInsert.length) {
+      return res.status(400).json({
+        message: "No valid recipes to import (all duplicated names)",
+        insertedCount: 0,
+        failedCount: errors.length,
+        errors: errors.slice(0, 50),
+      });
+    }
+
+    const inserted = await Recipe.insertMany(validToInsert, { ordered: false });
 
     if (inserted.length) {
       const categoryCounts = inserted.reduce((acc, recipe) => {

@@ -3,6 +3,25 @@ import mongoose from "mongoose";
 import Category from "../models/Category.js";
 import Recipe from "../models/Recipe.js"; // nếu Recipe cũng là ES Module
 
+const normalizeCategoryName = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+const findCategoryByName = async (name, excludeId = null) => {
+  const normalized = normalizeCategoryName(name);
+  if (!normalized) return null;
+
+  const categories = await Category.find({}, "_id name").lean();
+  return (
+    categories.find((category) => {
+      if (excludeId && String(category._id) === String(excludeId)) return false;
+      return normalizeCategoryName(category.name) === normalized;
+    }) || null
+  );
+};
+
 export const getAllCategories = async (req, res) => {
   try {
     const categories = await Category.getAllCategories();
@@ -28,18 +47,23 @@ export const getCategoryById = async (req, res) => {
 
 export const createCategory = async (req, res) => {
   try {
-    const { name } = req.body;
-    if (!name) {
+    const normalizedName = String(req.body?.name || "").trim().replace(/\s+/g, " ");
+    if (!normalizedName) {
       return res.status(400).json({ message: "Category name is required" });
     }
     if (!req.file) {
       return res.status(400).json({ message: "Category image is required" });
     }
 
+    const duplicated = await findCategoryByName(normalizedName);
+    if (duplicated) {
+      return res.status(409).json({ message: `Category name already exists: ${duplicated.name}` });
+    }
+
     const image = req.file.path;
     // Dùng Category.create là đúng rồi
     const category = await Category.create({
-      name,
+      name: normalizedName,
       image,
     });
     res.status(201).json(category);
@@ -55,8 +79,12 @@ export const createCategory = async (req, res) => {
 export const updateCategory = async (req, res) => {
   try {
     const categoryId = req.params.id;
-    const { name } = req.body;
-    const updateData = { name };
+    const rawName = String(req.body?.name || "").trim();
+    const normalizedName = rawName ? rawName.replace(/\s+/g, " ") : "";
+    const updateData = {};
+    if (normalizedName) {
+      updateData.name = normalizedName;
+    }
     if (req.file) {
       updateData.image = req.file.path;
     }
@@ -67,13 +95,20 @@ export const updateCategory = async (req, res) => {
       return res.status(404).json({ message: "Category not found" });
     }
 
+    if (normalizedName) {
+      const duplicated = await findCategoryByName(normalizedName, categoryId);
+      if (duplicated) {
+        return res.status(409).json({ message: `Category name already exists: ${duplicated.name}` });
+      }
+    }
+
     const category = await Category.updateCategory(categoryId, updateData); // Dùng hàm static đã sửa
 
     // THÊM: Nếu tên đã thay đổi, cập nhật tất cả Recipe liên quan
-    if (name && name !== oldCategory.name) {
+    if (normalizedName && normalizedName !== oldCategory.name) {
       await Recipe.updateMany(
         { category: oldCategory.name },
-        { $set: { category: name } }
+        { $set: { category: normalizedName } }
       );
     }
 
