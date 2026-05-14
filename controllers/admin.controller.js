@@ -11,6 +11,7 @@ import SubscriptionPlan from "../models/SubscriptionPlan.js";
 import Notifications from "../models/Notifications.js";
 import Subscription from "../models/Subscription.js";
 import Activity from "../models/Activity.js";
+import Follow from "../models/Follow.js";
 import { sendNotificationToExternalIds } from "../services/notification.service.js";
 
 export const getAllUsers = async (req, res) => {
@@ -148,10 +149,77 @@ export const updateUser = async (req, res) => {
 
 export const getAllPosts = async (_, res) => {
   try {
-    const posts = await Post.find().populate("author", "fullName");
+    const posts = await Post.find().populate("author", "fullName role avatarUrl");
     res.json(posts);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch posts" });
+  }
+};
+
+export const createPost = async (req, res) => {
+  try {
+    const { caption } = req.body;
+    const image = req.files?.imageFile?.[0];
+    const video = req.files?.videoFile?.[0];
+
+    if (!caption || !caption.trim()) {
+      return res.status(400).json({ message: "Caption is required" });
+    }
+
+    const post = await Post.create({
+      caption: caption.trim(),
+      imageUrl: image?.path || "",
+      videoUrl: video?.path || "",
+      author: req.user.id,
+    });
+
+    try {
+      const followers = await Follow.find({ following: post.author }).select("follower");
+      const followerUserIds = followers.map((follower) => follower.follower);
+
+      if (followerUserIds.length > 0) {
+        const willingUsers = await Notifications.find({
+          user: { $in: followerUserIds },
+          pushEnabled: true,
+          newPostsFromFollowing: true,
+        }).select("user");
+
+        const finalUserIds = willingUsers.map((user) => user.user.toString());
+
+        if (finalUserIds.length > 0) {
+          sendNotificationToExternalIds(
+            finalUserIds,
+            {
+              en: "New Post",
+              vi: `${req.user.fullName} vừa đăng bài viết mới`,
+            },
+            { en: post.caption, vi: post.caption },
+            { type: "new_post", id: post._id.toString() }
+          );
+        }
+
+        const activities = followerUserIds.map((followerId) => ({
+          user: followerId,
+          actor: req.user.id,
+          type: "new_post",
+          entity: post._id,
+          message: `${req.user.fullName} vừa đăng bài viết mới`,
+          createdAt: new Date(),
+          isRead: false,
+        }));
+
+        if (activities.length > 0) {
+          await Activity.insertMany(activities);
+        }
+      }
+    } catch (notifError) {
+      console.error("Lỗi khi gửi thông báo 'bài viết mới' từ admin:", notifError);
+    }
+
+    const createdPost = await Post.findById(post._id).populate("author", "fullName avatarUrl");
+    res.status(201).json(createdPost);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to create post", error: err.message });
   }
 };
 

@@ -1,10 +1,12 @@
 import express from 'express';
 import { protect, isAdmin } from '../middlewares/authMiddleware.js';
+import upload from '../middlewares/uploadMiddleware.js';
 import {
   getAllUsers,
   deleteUser,
   deletePost,
   getAllPosts,
+  createPost,
   deleteComment,
   updateUser,
   getAdminStats,
@@ -22,6 +24,10 @@ import {
 } from '../controllers/admin.controller.js';
 
 const router = express.Router();
+const postUploader = upload.fields([
+  { name: 'imageFile', maxCount: 1 },
+  { name: 'videoFile', maxCount: 1 },
+]);
 
 router.use(protect, isAdmin);
 
@@ -37,6 +43,7 @@ router.get('/stats/revenue', getRevenueStats);
 
 // Bài viết
 router.get('/posts', getAllPosts);
+router.post('/posts', postUploader, createPost);
 router.delete('/posts/:id', deletePost);
 
 // Bình luận
