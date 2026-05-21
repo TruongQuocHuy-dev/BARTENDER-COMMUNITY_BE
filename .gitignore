@@ -4,3 +4,5 @@ dist/
 firebase-key.json
 *.serviceAccountKey.json
 *.firebase-key.json
+
+ADMIN_TODOS.md

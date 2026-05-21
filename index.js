@@ -29,6 +29,7 @@ import {
 } from "./controllers/payment.controller.js";
 import settingsRoutes from "./routes/notification.routes.js";
 import activityRoutes from "./routes/activity.routes.js";
+import auditRoutes from "./routes/audit.routes.js";
 
 const app = express();
 app.use(cors());
@@ -98,6 +99,7 @@ app.use("/api/v1/payment-methods", paymentMethodRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/activities", activityRoutes);
+app.use("/api/admin/audits", auditRoutes);
 // Error handling middleware (must be after all routes)
 app.use(errorHandler);
 

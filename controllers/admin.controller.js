@@ -13,6 +13,7 @@ import Subscription from "../models/Subscription.js";
 import Activity from "../models/Activity.js";
 import Follow from "../models/Follow.js";
 import { sendNotificationToExternalIds } from "../services/notification.service.js";
+import { createAudit } from "../services/audit.service.js";
 
 export const getAllUsers = async (req, res) => {
   try {
@@ -55,6 +56,11 @@ export const deleteUser = async (req, res) => {
         .json({ message: "Cannot delete admin or user not found" });
     }
     await user.deleteOne();
+    try {
+      await createAudit(req, { action: 'delete_user', resourceType: 'User', resourceId: user._id, details: { email: user.email } });
+    } catch (e) {
+      console.error('Audit log failed for deleteUser:', e);
+    }
     res.json({ message: "User deleted successfully" });
   } catch (err) {
     res.status(500).json({ message: "Failed to delete user" });
@@ -135,6 +141,12 @@ export const updateUser = async (req, res) => {
           { upsert: true, new: true, runValidators: true },
         );
       }
+    }
+
+    try {
+      await createAudit(req, { action: 'update_user', resourceType: 'User', resourceId: user._id, details: { changes: updateData, subscriptionPlanId: typeof subscriptionPlanId === 'string' ? subscriptionPlanId : null } });
+    } catch (e) {
+      console.error('Audit log failed for updateUser:', e);
     }
 
     res.json(user);
@@ -226,6 +238,7 @@ export const createPost = async (req, res) => {
 export const deletePost = async (req, res) => {
   try {
     await Post.findByIdAndDelete(req.params.id);
+    try { await createAudit(req, { action: 'delete_post', resourceType: 'Post', resourceId: req.params.id, details: {} }); } catch (e) { console.error('Audit log failed for deletePost:', e); }
     res.json({ message: "Post deleted" });
   } catch (err) {
     res.status(500).json({ message: "Failed to delete post" });
@@ -235,6 +248,7 @@ export const deletePost = async (req, res) => {
 export const deleteComment = async (req, res) => {
   try {
     await Comment.findByIdAndDelete(req.params.id);
+    try { await createAudit(req, { action: 'delete_comment', resourceType: 'Comment', resourceId: req.params.id, details: {} }); } catch (e) { console.error('Audit log failed for deleteComment:', e); }
     res.json({ message: "Comment deleted" });
   } catch (err) {
     res.status(500).json({ message: "Failed to delete comment" });
@@ -573,6 +587,8 @@ export const approveRecipe = async (req, res) => {
     // (Xóa toàn bộ khối 'if (recipe.isPremium)' cũ)
     await sendRecipeApprovalNotifications(recipe); 
 
+    try { await createAudit(req, { action: 'approve_recipe', resourceType: 'Recipe', resourceId: recipe._id, details: { name: recipe.name } }); } catch (e) { console.error('Audit log failed for approveRecipe:', e); }
+
     res.json(recipe);
     
   } catch (err) {
@@ -610,6 +626,8 @@ export const rejectRecipe = async (req, res) => {
 
     // 👇 CHANGED: GỌI HÀM HELPER THÔNG BÁO TỪ CHỐI
     await sendRecipeRejectionNotifications(recipe); 
+
+    try { await createAudit(req, { action: 'reject_recipe', resourceType: 'Recipe', resourceId: recipe._id, details: { name: recipe.name } }); } catch (e) { console.error('Audit log failed for rejectRecipe:', e); }
 
     res.json(recipe);
   } catch (err) {
@@ -685,6 +703,7 @@ export const approveAllPendingRecipes = async (req, res) => {
       approvedCount++;
     }
     
+    try { await createAudit(req, { action: 'approve_all_pending_recipes', resourceType: 'Recipe', resourceId: null, details: { count: approvedCount } }); } catch (e) { console.error('Audit log failed for approveAllPendingRecipes:', e); }
     res.json({ message: `Đã duyệt thành công ${approvedCount} công thức.`, count: approvedCount });
 
   } catch (err) {
