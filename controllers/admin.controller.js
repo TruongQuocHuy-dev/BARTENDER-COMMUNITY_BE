@@ -6,6 +6,7 @@ import Banner from "../models/Banner.js";
 import Comment from "../models/Comment.js";
 import Payment from "../models/Payment.js";
 import Report from "../models/Report.js";
+import AuditLog from "../models/AuditLog.js";
 import SubscriptionPlan from "../models/SubscriptionPlan.js";
 
 import Notifications from "../models/Notifications.js";
@@ -338,6 +339,195 @@ export const getRevenueStats = async (req, res) => {
   } catch (err) {
     console.error("getRevenueStats error:", err);
     res.status(500).json({ message: "Failed to fetch revenue stats" });
+  }
+};
+
+export const getDashboardOverview = async (req, res) => {
+  try {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const now = new Date();
+    const currentStart = new Date(now.getTime() - 7 * DAY_MS);
+    const previousStart = new Date(now.getTime() - 14 * DAY_MS);
+
+    const toDayKey = (date) => {
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const formatDayLabel = (date) => date.toLocaleDateString('vi-VN', {
+      timeZone: 'UTC',
+      day: '2-digit',
+      month: '2-digit',
+    });
+
+    const buildSeries = (rows = [], valueKey = 'count') => {
+      const map = new Map(rows.map((item) => [item._id, item[valueKey] || 0]));
+      return Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(currentStart.getTime() + (index * DAY_MS));
+        const key = toDayKey(date);
+        return {
+          name: formatDayLabel(date),
+          total: map.get(key) || 0,
+        };
+      });
+    };
+
+    const percentChange = (currentValue, previousValue) => {
+      if (!previousValue) {
+        return currentValue > 0 ? 100 : 0;
+      }
+      return Number((((currentValue - previousValue) / previousValue) * 100).toFixed(1));
+    };
+
+    const [
+      totalUsers,
+      activeRecipeCount,
+      currentUserSignups,
+      previousUserSignups,
+      currentApprovedRecipes,
+      previousApprovedRecipes,
+      currentPendingRecipes,
+      previousPendingRecipes,
+      currentPendingReports,
+      previousPendingReports,
+      currentRevenueAgg,
+      previousRevenueAgg,
+      userGrowthAgg,
+      revenueAgg,
+      revenueByPlanAgg,
+      recipeStatusAgg,
+      planList,
+    ] = await Promise.all([
+      User.countDocuments(),
+      Recipe.countDocuments({ status: 'approved' }),
+      User.countDocuments({ createdAt: { $gte: currentStart } }),
+      User.countDocuments({ createdAt: { $gte: previousStart, $lt: currentStart } }),
+      Recipe.countDocuments({ status: 'approved', createdAt: { $gte: currentStart } }),
+      Recipe.countDocuments({ status: 'approved', createdAt: { $gte: previousStart, $lt: currentStart } }),
+      Recipe.countDocuments({ $or: [{ status: 'pending' }, { status: { $exists: false } }], createdAt: { $gte: currentStart } }),
+      Recipe.countDocuments({ $or: [{ status: 'pending' }, { status: { $exists: false } }], createdAt: { $gte: previousStart, $lt: currentStart } }),
+      Report.countDocuments({ status: 'pending', createdAt: { $gte: currentStart } }),
+      Report.countDocuments({ status: 'pending', createdAt: { $gte: previousStart, $lt: currentStart } }),
+      Payment.aggregate([
+        { $match: { status: 'completed', createdAt: { $gte: currentStart } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]),
+      Payment.aggregate([
+        { $match: { status: 'completed', createdAt: { $gte: previousStart, $lt: currentStart } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]),
+      User.aggregate([
+        { $match: { createdAt: { $gte: currentStart } } },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$createdAt',
+                timezone: 'UTC',
+              },
+            },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      Payment.aggregate([
+        { $match: { status: 'completed', createdAt: { $gte: currentStart } } },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$createdAt',
+                timezone: 'UTC',
+              },
+            },
+            total: { $sum: '$amount' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      Payment.aggregate([
+        { $match: { status: 'completed' } },
+        {
+          $group: {
+            _id: { $ifNull: ['$planId', 'free'] },
+            total: { $sum: '$amount' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { total: -1 } },
+      ]),
+      Recipe.aggregate([
+        {
+          $group: {
+            _id: { $ifNull: ['$status', 'pending'] },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { count: -1 } },
+      ]),
+      SubscriptionPlan.find().select('planId name tier price').lean(),
+    ]);
+
+    const pendingModeration = currentPendingRecipes + currentPendingReports;
+    const previousPendingModeration = previousPendingRecipes + previousPendingReports;
+    const revenue7d = currentRevenueAgg[0]?.total || 0;
+    const previousRevenue7d = previousRevenueAgg[0]?.total || 0;
+
+    const recipeStatusMap = recipeStatusAgg.reduce((acc, item) => {
+      acc[item._id || 'pending'] = item.count || 0;
+      return acc;
+    }, {});
+
+    const planMap = planList.reduce((acc, plan) => {
+      acc[plan.planId] = plan;
+      return acc;
+    }, {});
+
+    const revenueByPlan = revenueByPlanAgg.map((item) => {
+      const plan = planMap[item._id] || {};
+      const planKey = String(item._id || 'free');
+      return {
+        planId: planKey,
+        name: plan.name || (planKey === 'free' ? 'Free' : planKey),
+        tier: plan.tier || (planKey === 'free' ? 'free' : 'premium'),
+        total: item.total || 0,
+        count: item.count || 0,
+        color: planKey === 'free' ? '#94a3b8' : '#6366f1',
+      };
+    });
+
+    res.json({
+      counts: {
+        totalUsers,
+        activeRecipeCount,
+        pendingModeration,
+        revenue7d,
+      },
+      trends: {
+        totalUsers: percentChange(currentUserSignups, previousUserSignups),
+        activeRecipeCount: percentChange(currentApprovedRecipes, previousApprovedRecipes),
+        pendingModeration: percentChange(pendingModeration, previousPendingModeration),
+        revenue7d: percentChange(revenue7d, previousRevenue7d),
+      },
+      charts: {
+        userGrowth: buildSeries(userGrowthAgg, 'count'),
+        recipeStatus: [
+          { name: 'Đã duyệt', value: recipeStatusMap.approved || 0, color: '#10b981' },
+          { name: 'Chờ duyệt', value: recipeStatusMap.pending || 0, color: '#f59e0b' },
+          { name: 'Từ chối', value: recipeStatusMap.rejected || 0, color: '#ef4444' },
+        ],
+        revenue7d: buildSeries(revenueAgg, 'total'),
+        revenueByPlan,
+      },
+    });
+  } catch (err) {
+    console.error('getDashboardOverview error:', err);
+    res.status(500).json({ message: 'Failed to fetch dashboard overview' });
   }
 };
 

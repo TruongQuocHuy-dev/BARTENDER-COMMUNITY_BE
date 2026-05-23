@@ -11,6 +11,7 @@ import {
   updateUser,
   getAdminStats,
   getRevenueStats,
+  getDashboardOverview,
   getAllReports,
   getReportOverview,
   updateReportStatus,
@@ -39,6 +40,7 @@ router.put('/users/:id', updateUser);
 // Admin stats
 router.get('/stats', getAdminStats);
 router.get('/stats/revenue', getRevenueStats);
+router.get('/stats/dashboard', getDashboardOverview);
 
 
 // Bài viết
