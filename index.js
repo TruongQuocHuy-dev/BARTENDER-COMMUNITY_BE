@@ -30,10 +30,16 @@ import {
 import settingsRoutes from "./routes/notification.routes.js";
 import activityRoutes from "./routes/activity.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
+import publicSettingsRoutes from "./routes/public-settings.routes.js";
+import systemRoutes from "./routes/system.routes.js";
+import checkMaintenanceMode from "./middlewares/checkMaintenanceMode.js";
+import systemSettingsCache from "./services/systemSettingsCache.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Maintenance mode check (global) - returns 503 for non-admin clients when enabled
+app.use(checkMaintenanceMode);
 app.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.originalUrl}`);
   console.log("Headers:", req.headers);
@@ -71,6 +77,9 @@ app.get("/api/v1/payments/vnpay_return", handleVnpayReturn);
 
 connectDB();
 
+// Load system settings cache once DB is connected
+systemSettingsCache.load().catch(err => console.warn('systemSettingsCache load failed at startup', err));
+
 const PORT = process.env.PORT || 3000;
 // app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
 
@@ -98,6 +107,15 @@ app.use("/api/v1/me/subscription", subscriptionRoutes);
 app.use("/api/v1/payment-methods", paymentMethodRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/settings", settingsRoutes);
+// Public read-only settings (cached)
+app.use('/api/settings', publicSettingsRoutes);
+// Admin-only system settings (CRUD)
+app.use('/api/admin/system', systemRoutes);
+// Health endpoint that reflects maintenance mode
+app.get('/health', (req, res) => {
+  if (systemSettingsCache.isMaintenanceMode()) return res.status(503).json({ message: 'Service is under maintenance' });
+  return res.json({ status: 'ok' });
+});
 app.use("/api/activities", activityRoutes);
 app.use("/api/admin/audits", auditRoutes);
 // Error handling middleware (must be after all routes)
