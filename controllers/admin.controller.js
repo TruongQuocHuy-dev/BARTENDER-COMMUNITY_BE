@@ -8,6 +8,8 @@ import Payment from "../models/Payment.js";
 import Report from "../models/Report.js";
 import AuditLog from "../models/AuditLog.js";
 import SubscriptionPlan from "../models/SubscriptionPlan.js";
+import Role from "../models/Role.js";
+import { getRoleByName } from "../services/role.service.js";
 
 import Notifications from "../models/Notifications.js";
 import Subscription from "../models/Subscription.js";
@@ -84,8 +86,17 @@ export const updateUser = async (req, res) => {
       }
     }
 
+    let resolvedRole = null;
+    if (typeof role === "string" && role.trim()) {
+      const normalizedRole = role.trim().toLowerCase();
+      resolvedRole = await getRoleByName(normalizedRole);
+      if (!resolvedRole) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+    }
+
     const updateData = {
-      ...(["user", "admin"].includes(role) ? { role } : {}),
+      ...(resolvedRole ? { role: resolvedRole.name } : {}),
       ...(typeof isBanned === "boolean" ? { isBanned } : {}),
       ...(typeof isVerified === "boolean" ? { isVerified } : {}),
     };

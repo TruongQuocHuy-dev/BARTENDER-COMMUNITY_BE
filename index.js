@@ -11,6 +11,7 @@ import commentRoutes from "./routes/comment.routes.js";
 import bannerRoutes from "./routes/banner.routes.js";
 import postRoutes from "./routes/post.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import roleRoutes from "./routes/role.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import chatbotRoutes from "./routes/chatbot.routes.js";
 import { protect } from "./middlewares/authMiddleware.js";
@@ -34,6 +35,7 @@ import publicSettingsRoutes from "./routes/public-settings.routes.js";
 import systemRoutes from "./routes/system.routes.js";
 import checkMaintenanceMode from "./middlewares/checkMaintenanceMode.js";
 import systemSettingsCache from "./services/systemSettingsCache.js";
+import { ensureDefaultRoles } from "./services/role.service.js";
 
 const app = express();
 app.use(cors());
@@ -76,6 +78,7 @@ app.post("/api/v1/payments/ipn/momo", handleMomoIpn);
 app.get("/api/v1/payments/vnpay_return", handleVnpayReturn);
 
 connectDB();
+ensureDefaultRoles().catch(err => console.warn('ensureDefaultRoles failed at startup', err));
 
 // Load system settings cache once DB is connected
 systemSettingsCache.load().catch(err => console.warn('systemSettingsCache load failed at startup', err));
@@ -94,6 +97,7 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", commentRoutes);
 app.use("/api/banners", bannerRoutes);
+app.use("/api/admin/roles", roleRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/v1/chat", chatbotRoutes);

@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema(
     location: { type: String },
     website: { type: String },
     avatarUrl: { type: String, default: "" },
-    role: { type: String, enum: ["user", "admin"], default: "user" },
+    role: { type: String, default: "user", trim: true, lowercase: true },
     isActive: { type: Boolean, default: true },
     isBanned: { type: Boolean, default: false },
     googleId: { type: String },

@@ -10,6 +10,7 @@ import SecuritySettings from "../models/Securitys.js";
 import speakeasy from "speakeasy";
 import twilio from "twilio";
 import Securitys from "../models/Securitys.js";
+import { attachRoleContext } from "../services/role.service.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "bartender_secret";
 const JWT_EXPIRES = "7d";
@@ -141,8 +142,9 @@ export const loginWithEmail = async (req, res) => {
       simpleUserPopulation
     );
     const token = signToken(populatedUser);
+    const sessionUser = await attachRoleContext(populatedUser);
 
-    res.json({ token, user });
+    res.json({ token, user: sessionUser });
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ message: "Internal server error" });
@@ -195,7 +197,8 @@ export const verifyTwoFactorLogin = async (req, res) => {
     }
 
     const token = signToken(user);
-    res.json({ token, user });
+    const sessionUser = await attachRoleContext(user);
+    res.json({ token, user: sessionUser });
   } catch (err) {
     console.error("verifyTwoFactorLogin error:", err);
     res.status(500).json({ message: "Internal server error" });
@@ -246,9 +249,10 @@ export const loginWithGoogle = async (req, res) => {
     }
 
     const token = signToken(populatedUser);
+    const sessionUser = await attachRoleContext(populatedUser);
     
     // Trả về user đã được populate đầy đủ
-    res.json({ token, user: populatedUser });
+    res.json({ token, user: sessionUser });
 
   } catch (err) {
     console.error("Google login error:", err);
@@ -325,8 +329,9 @@ export const loginWithFacebook = async (req, res) => {
     // 4. Populate và trả Token
     const populatedUser = await User.findById(user._id).populate(simpleUserPopulation);
     const token = signToken(populatedUser);
+    const sessionUser = await attachRoleContext(populatedUser);
 
-    res.json({ token, user: populatedUser });
+    res.json({ token, user: sessionUser });
 
   } catch (err) {
     console.error("Facebook login error:", err);

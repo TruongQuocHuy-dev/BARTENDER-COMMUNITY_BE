@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { attachRoleContext } from "../services/role.service.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "bartender_secret";
 
@@ -14,11 +15,7 @@ export const protect = async (req, res, next) => {
       const user = await User.findById(decoded.userId).select("-password");
       if (!user) return res.status(401).json({ message: "User not found" });
 
-      // 👇 Chuẩn hóa: req.user luôn có `_id` và alias `id`
-      req.user = {
-        ...user.toObject(),
-        id: user._id.toString(),
-      };
+      req.user = await attachRoleContext(user);
 
       return next();
     } catch (err) {
@@ -59,11 +56,7 @@ export const optionalAuth = async (req, res, next) => {
 
       const user = await User.findById(decoded.userId).select("-password");
       if (user) {
-        // Gán user vào req
-        req.user = {
-          ...user.toObject(),
-          id: user._id.toString(),
-        };
+        req.user = await attachRoleContext(user);
       }
     } catch (err) {
       // Token không hợp lệ, không làm gì cả, cứ tiếp tục
