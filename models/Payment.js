@@ -13,7 +13,7 @@ const paymentSchema = new mongoose.Schema(
     transactionId: { type: String, required: true, index: true }, 
     status: {
       type: String,
-      enum: ["pending", "completed", "failed"],
+      enum: ["pending", "completed", "failed", "refunded"],
       required: true,
     },
     amount: { type: Number, required: true },
@@ -21,6 +21,15 @@ const paymentSchema = new mongoose.Schema(
     method: { type: String, enum: ["vnpay", "momo", "card"], required: true },
     description: { type: String }, // "Nâng cấp lên Premium (monthly)"
     planId: { type: String }, // Gói đăng ký liên quan
+    refund: {
+      status: { type: String, enum: ["none", "simulated", "processed"], default: "none" },
+      reason: { type: String },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      requestedAt: { type: Date },
+      processedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      processedAt: { type: Date },
+      gatewayReference: { type: String },
+    },
   },
   { timestamps: true } // `createdAt` sẽ là ngày thanh toán
 );

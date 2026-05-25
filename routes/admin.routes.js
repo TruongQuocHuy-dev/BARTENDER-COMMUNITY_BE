@@ -23,6 +23,12 @@ import {
   approveAllPendingRecipes,
   importRecipesBulk
 } from '../controllers/admin.controller.js';
+import {
+  getAdminPayments,
+  getAdminPaymentById,
+  refundPayment,
+  exportAdminPaymentsCsv,
+} from '../controllers/payment.admin.controller.js';
 
 const router = express.Router();
 const postUploader = upload.fields([
@@ -62,5 +68,10 @@ router.put('/recipes/:id/approve', approveRecipe);
 router.put('/recipes/:id/reject', rejectRecipe);
 router.put('/recipes/approve-all', approveAllPendingRecipes);
 router.post('/recipes/import', importRecipesBulk);
+
+router.get('/payments', getAdminPayments);
+router.get('/payments/export', exportAdminPaymentsCsv);
+router.get('/payments/:id', getAdminPaymentById);
+router.post('/payments/:id/refund', refundPayment);
 
 export default router;
