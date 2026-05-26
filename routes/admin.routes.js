@@ -25,6 +25,14 @@ import {
   importRecipesBulk
 } from '../controllers/admin.controller.js';
 import {
+  getModerationQueue,
+  hideRecipe,
+  restoreRecipe,
+  togglePinnedRecipe,
+  toggleFeaturedRecipe,
+  bulkModerateRecipes,
+} from '../controllers/moderation.controller.js';
+import {
   getAdminPayments,
   getAdminPaymentById,
   refundPayment,
@@ -69,6 +77,13 @@ router.put('/recipes/:id/approve', requirePermission('recipes:approve'), approve
 router.put('/recipes/:id/reject', requirePermission('recipes:reject'), rejectRecipe);
 router.put('/recipes/approve-all', requirePermission('recipes:approve'), approveAllPendingRecipes);
 router.post('/recipes/import', requirePermission('recipes:import'), importRecipesBulk);
+
+router.get('/moderation/queue', requirePermission('recipes:read'), getModerationQueue);
+router.put('/moderation/recipes/:id/hide', requirePermission('recipes:moderate'), hideRecipe);
+router.put('/moderation/recipes/:id/restore', requirePermission('recipes:moderate'), restoreRecipe);
+router.put('/moderation/recipes/:id/pin', requirePermission('recipes:moderate'), togglePinnedRecipe);
+router.put('/moderation/recipes/:id/feature', requirePermission('recipes:moderate'), toggleFeaturedRecipe);
+router.post('/moderation/bulk', requirePermission('recipes:moderate'), bulkModerateRecipes);
 
 router.get('/payments', requirePermission('payments:read'), getAdminPayments);
 router.get('/payments/export', requirePermission('payments:export'), exportAdminPaymentsCsv);

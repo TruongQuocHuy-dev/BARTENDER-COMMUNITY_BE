@@ -20,6 +20,7 @@ export const AVAILABLE_PERMISSIONS = [
   'recipes:approve',
   'recipes:reject',
   'recipes:import',
+  'recipes:moderate',
   'payments:read',
   'payments:refund',
   'payments:export',
@@ -47,7 +48,7 @@ const DEFAULT_ROLES = [
     name: 'moderator',
     displayName: 'Kiểm duyệt',
     description: 'Duyệt nội dung và xử lý moderation workflow',
-    permissions: ['dashboard:read', 'reports:read', 'reports:update', 'recipes:read', 'recipes:approve', 'recipes:reject', 'posts:delete', 'comments:delete'],
+    permissions: ['dashboard:read', 'reports:read', 'reports:update', 'recipes:read', 'recipes:approve', 'recipes:reject', 'recipes:moderate', 'posts:delete', 'comments:delete'],
     isSystem: true,
   },
   {

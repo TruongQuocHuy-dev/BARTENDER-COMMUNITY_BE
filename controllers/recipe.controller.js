@@ -137,7 +137,8 @@ const searchByImage = async (req, res) => {
 
     const recipes = await Recipe.find({ 
       _id: { $in: recipeIds },
-      status: "approved" // Chỉ tìm công thức đã duyệt
+      status: "approved",
+      isHidden: { $ne: true },
     }).populate(
       "author",
       "fullName email avatarUrl"
@@ -164,7 +165,8 @@ const getAllRecipes = async (req, res) => {
     const skip = (parsedPage - 1) * parsedLimit;
 
     const filter = {
-      status: "approved" // Luôn luôn chỉ lấy công thức đã duyệt
+      status: "approved",
+      isHidden: { $ne: true },
     };
     if (category) filter.category = category;
 
@@ -217,7 +219,8 @@ const getRecipeById = async (req, res) => {
 
     const recipe = await Recipe.findOne({ 
       _id: recipeId, 
-      status: "approved" // Chỉ tìm thấy nếu đã được duyệt
+      status: "approved",
+      isHidden: { $ne: true },
     }).populate(
       "author",
       "fullName email avatarUrl"
@@ -594,7 +597,8 @@ const getRecipesByUser = async (req, res) => {
     // Lọc recipe theo 'author' (hoặc trường bạn dùng để lưu người tạo)
     const recipes = await Recipe.find({ 
       author: userId,
-      status: "approved" // <-- THÊM VÀO
+      status: "approved",
+      isHidden: { $ne: true },
     })
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -603,7 +607,8 @@ const getRecipesByUser = async (req, res) => {
     // 👇 CHANGED: Thêm 'status: "approved"'
     const totalRecipes = await Recipe.countDocuments({ 
       author: userId,
-      status: "approved" // <-- THÊM VÀO
+      status: "approved",
+      isHidden: { $ne: true },
     });
 
     res.status(200).json({
@@ -672,7 +677,7 @@ const searchRecipes = async (req, res) => {
     const { category, difficulty, ingredients, keyword } = req.query;
 
     // 1. Xây dựng bộ lọc (query) cho MongoDB
-    const queryFilter = { status: "approved" }; // Luôn luôn chỉ tìm công thức đã duyệt
+    const queryFilter = { status: "approved", isHidden: { $ne: true } };
 
     if (category) {
       // --- SỬA LỖI VIẾT THƯỜNG ---
