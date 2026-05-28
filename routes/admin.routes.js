@@ -26,6 +26,13 @@ import {
   importRecipesBulk
 } from '../controllers/admin.controller.js';
 import {
+  createCampaign,
+  listCampaigns,
+  getCampaign,
+  sendCampaign,
+} from '../controllers/notification.admin.controller.js';
+import { previewCampaign } from '../controllers/notification.admin.controller.js';
+import {
   getModerationQueue,
   hideRecipe,
   restoreRecipe,
@@ -78,6 +85,13 @@ router.put('/recipes/:id/approve', requirePermission('recipes:approve'), audit('
 router.put('/recipes/:id/reject', requirePermission('recipes:reject'), audit('reject_recipe', 'Recipe'), rejectRecipe);
 router.put('/recipes/approve-all', requirePermission('recipes:approve'), approveAllPendingRecipes);
 router.post('/recipes/import', requirePermission('recipes:import'), audit('import_recipes', 'Recipe'), importRecipesBulk);
+
+// Admin broadcast campaigns
+router.post('/notifications/campaigns', requirePermission('notifications:send'), createCampaign);
+router.get('/notifications/campaigns', requirePermission('notifications:send'), listCampaigns);
+router.get('/notifications/campaigns/:id', requirePermission('notifications:send'), getCampaign);
+router.post('/notifications/campaigns/:id/send', requirePermission('notifications:send'), audit('send_campaign', 'Campaign'), sendCampaign);
+router.post('/notifications/campaigns/preview', requirePermission('notifications:send'), previewCampaign);
 
 router.get('/moderation/queue', requirePermission('recipes:read'), getModerationQueue);
 router.put('/moderation/recipes/:id/hide', requirePermission('recipes:moderate'), hideRecipe);
