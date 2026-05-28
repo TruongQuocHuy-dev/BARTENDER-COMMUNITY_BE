@@ -12,6 +12,7 @@ export const AVAILABLE_PERMISSIONS = [
   'posts:read',
   'posts:create',
   'posts:delete',
+  'categories:manage',
   'comments:delete',
   'reports:read',
   'reports:update',

@@ -2,6 +2,7 @@ import express from 'express';
 import { protect } from '../middlewares/authMiddleware.js';
 import { requirePermission } from '../middlewares/roleMiddleware.js';
 import upload from '../middlewares/uploadMiddleware.js';
+import { audit } from '../middlewares/auditMiddleware.js';
 import {
   getAllUsers,
   deleteUser,
@@ -49,8 +50,8 @@ router.use(protect);
 
 // Quản lý user
 router.get('/users', requirePermission('users:read'), getAllUsers);
-router.delete('/users/:id', requirePermission('users:delete'), deleteUser);
-router.put('/users/:id', requirePermission('users:update'), updateUser);
+router.delete('/users/:id', requirePermission('users:delete'), audit('delete_user', 'User'), deleteUser);
+router.put('/users/:id', requirePermission('users:update'), audit('update_user', 'User'), updateUser);
 
 // Admin stats
 router.get('/stats', requirePermission('dashboard:read'), getAdminStats);
@@ -61,22 +62,22 @@ router.get('/stats/dashboard', requirePermission('dashboard:read'), getDashboard
 // Bài viết
 router.get('/posts', requirePermission('posts:read'), getAllPosts);
 router.post('/posts', requirePermission('posts:create'), postUploader, createPost);
-router.delete('/posts/:id', requirePermission('posts:delete'), deletePost);
+router.delete('/posts/:id', requirePermission('posts:delete'), audit('delete_post', 'Post'), deletePost);
 
 // Bình luận
 router.delete('/comments/:id', requirePermission('comments:delete'), deleteComment);
 
 router.get('/reports', requirePermission('reports:read'), getAllReports);
 router.get('/reports/overview', requirePermission('reports:read'), getReportOverview);
-router.put('/reports/:id', requirePermission('reports:update'), updateReportStatus);
-router.delete('/reports/:id', requirePermission('reports:delete'), deleteReport);
+router.put('/reports/:id', requirePermission('reports:update'), audit('update_report', 'Report'), updateReportStatus);
+router.delete('/reports/:id', requirePermission('reports:delete'), audit('delete_report', 'Report'), deleteReport);
 
 router.get('/recipes/all', requirePermission('recipes:read'), getAllRecipesForAdmin); // <-- ROUTE MỚI
 router.get('/recipes/pending', requirePermission('recipes:read'), getPendingRecipes);
-router.put('/recipes/:id/approve', requirePermission('recipes:approve'), approveRecipe);
-router.put('/recipes/:id/reject', requirePermission('recipes:reject'), rejectRecipe);
+router.put('/recipes/:id/approve', requirePermission('recipes:approve'), audit('approve_recipe', 'Recipe'), approveRecipe);
+router.put('/recipes/:id/reject', requirePermission('recipes:reject'), audit('reject_recipe', 'Recipe'), rejectRecipe);
 router.put('/recipes/approve-all', requirePermission('recipes:approve'), approveAllPendingRecipes);
-router.post('/recipes/import', requirePermission('recipes:import'), importRecipesBulk);
+router.post('/recipes/import', requirePermission('recipes:import'), audit('import_recipes', 'Recipe'), importRecipesBulk);
 
 router.get('/moderation/queue', requirePermission('recipes:read'), getModerationQueue);
 router.put('/moderation/recipes/:id/hide', requirePermission('recipes:moderate'), hideRecipe);
